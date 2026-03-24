@@ -263,6 +263,342 @@ All contributions should include (or update) any tests relevant to the modified 
 You can use the provided `./scripts/test.sh` to run the full test suite (and generate a full coverage report).
 Additionally, any contribution which results in reduced overall code coverage will be put on-hold for review until the tests have been added or updated.
 
+---
+
+# Developer Setup Guide
+
+This section provides detailed instructions for building OpenCBDC from source, running tests, and setting up a local development environment.
+
+For configuration options, see [configuration.md](configuration.md).
+For the full architecture overview, see [architecture.md](architecture.md).
+
+## Supported Platforms
+
+| Platform | Architecture | Status |
+|----------|-------------|--------|
+| Ubuntu 22.04+ | x86_64 | Primary target |
+| macOS (Intel / Apple Silicon) | x86_64 / arm64 | Community-supported |
+| Docker | x86_64 | Official Dockerfile provided |
+
+> **Note:** The build system and development team primarily target Linux on x86_64. macOS builds require additional setup via Homebrew. The Docker configuration in `scripts/Dockerfile` serves as the definitive specification of the supported environment.
+
+## Prerequisites
+
+### Linux (Ubuntu 22.04+)
+
+System packages installed by `scripts/install-build-tools.sh`:
+
+| Package | Purpose |
+|---------|---------|
+| `build-essential` | GCC/G++ compiler toolchain |
+| `cmake` | Build system generator |
+| `wget`, `unzip`, `rsync` | Dependency download and file management |
+| `git` | Version control |
+| `libgtest-dev` | GoogleTest (unit testing framework) |
+| `libbenchmark-dev` | Google Benchmark (micro-benchmarks) |
+| `lcov` | Code coverage reporting |
+| `clang-format-14` | Code formatting |
+| `clang-tidy-14` | Static analysis and linting |
+| `software-properties-common` | Repository management |
+| `python3.10+` | Python for tooling scripts |
+
+### macOS
+
+Packages installed via Homebrew:
+
+```
+brew install llvm@14 googletest google-benchmark lcov make wget cmake bash bc
+```
+
+> **Note:** Xcode Command Line Tools must be installed: `xcode-select --install`
+
+### Third-Party C++ Dependencies
+
+These libraries are built from source by `scripts/setup-dependencies.sh` and installed into a local `prefix/` directory (not system-wide):
+
+| Library | Version | Purpose |
+|---------|---------|---------|
+| [LevelDB](https://github.com/google/leveldb) | 1.23 | On-disk key-value storage for shards and archivers |
+| [NuRaft](https://github.com/eBay/NuRaft) | 2.1.0 | Raft consensus protocol implementation |
+| [Lua](https://www.lua.org/) | 5.4.3 | Lua smart contract runtime (PArSEC) |
+| [curl](https://curl.se/) | 7.83.1 | HTTP client (Linux only; skipped on macOS) |
+| [JsonCpp](https://github.com/open-source-parsers/jsoncpp) | 1.9.5 | JSON parsing for PArSEC RPC |
+| [EVMC](https://github.com/ethereum/evmc) | 10.0.0 | Ethereum VM interface |
+| [evmone](https://github.com/ethereum/evmone) | 0.9.1 | Ethereum VM implementation (PArSEC EVM runner) |
+| [ethash/keccak](https://github.com/chfast/ethash) | (pinned commit) | Keccak hashing for Ethereum compatibility |
+| [libmicrohttpd](https://www.gnu.org/software/libmicrohttpd/) | 0.9.75 | HTTP server for PArSEC JSON-RPC |
+
+> **Note:** secp256k1 (for cryptographic signatures) is included as a git submodule in `3rdparty/`.
+
+## Step-by-Step Build Instructions
+
+### 1. Clone the Repository
+
+```bash
+git clone --recurse-submodules https://github.com/mit-dci/opencbdc-tx.git
+cd opencbdc-tx
+```
+
+If you already cloned without `--recurse-submodules`:
+```bash
+git submodule update --init --recursive
+```
+
+### 2. Install Build Tools
+
+```bash
+sudo ./scripts/install-build-tools.sh
+```
+
+This installs system packages (compilers, cmake, clang-format, clang-tidy, python, etc.) and sets up a Python virtual environment.
+
+### 3. Build Third-Party Dependencies
+
+```bash
+./scripts/setup-dependencies.sh
+```
+
+This downloads, compiles, and installs all C++ dependencies into the `prefix/` directory. It takes several minutes on first run.
+
+For **release builds** (optimized, no debug symbols):
+```bash
+BUILD_RELEASE=1 ./scripts/setup-dependencies.sh
+```
+
+### 4. Build OpenCBDC
+
+```bash
+./scripts/build.sh
+```
+
+Build variants:
+```bash
+./scripts/build.sh Debug       # -O0 -g (default)
+./scripts/build.sh Release     # -O3 -DNDEBUG
+./scripts/build.sh Profiling   # Profiling-optimized
+```
+
+Or use environment variables:
+```bash
+BUILD_DEBUG=1 ./scripts/build.sh
+BUILD_RELEASE=1 ./scripts/build.sh
+```
+
+The build output is placed in the `build/` directory by default. Override with:
+```bash
+BUILD_DIR=mybuild ./scripts/build.sh
+```
+
+### 5. Build with Docker (Alternative)
+
+```bash
+docker build -t opencbdc-tx -f scripts/Dockerfile .
+```
+
+## Running the Test Suite
+
+### Full Test Suite
+
+```bash
+./scripts/test.sh
+```
+
+This runs both unit tests and integration tests, and generates a code coverage report.
+
+### Unit Tests Only
+
+```bash
+./scripts/test.sh --no-integration-tests
+```
+
+Or without coverage measurement:
+```bash
+./scripts/test.sh -ni -nc
+```
+
+### Integration Tests Only
+
+```bash
+./scripts/test.sh --no-unit-tests
+```
+
+### Filtering Tests
+
+Use GoogleTest filter syntax to run specific tests:
+
+```bash
+# Run all tests in the ArchiverTest suite
+./scripts/test.sh --gtest_filter=ArchiverTest*
+
+# Run a single test, repeated 4 times, no coverage
+./scripts/test.sh --gtest_filter=ArchiverTest.client --gtest_repeat=4 -nc
+
+# Stop on first failure
+./scripts/test.sh -ni -nc --gtest_break_on_failure
+```
+
+### Using CTest Directly
+
+After building, you can also run tests directly with CTest:
+
+```bash
+cd build
+ctest --output-on-failure
+```
+
+## Running a Local Test Network
+
+The integration tests in `tests/integration/` demonstrate how to run multi-component networks locally.
+You can also use the provided Docker Compose configurations.
+
+### Using Docker Compose
+
+The repository includes pre-configured Docker Compose files for both architectures:
+
+**Atomizer architecture:**
+```bash
+# Uses atomizer-compose.cfg
+docker compose -f docker-compose-atomizer.yml up
+```
+
+**2PC architecture:**
+```bash
+# Uses 2pc-compose.cfg
+docker compose -f docker-compose-2pc.yml up
+```
+
+### Using the PArSEC Local Runner
+
+For the PArSEC architecture:
+```bash
+./scripts/parsec-run-local.sh
+```
+
+### Configuration Files
+
+See the example configuration files in the repository root:
+- `atomizer-compose.cfg` — Atomizer architecture (Docker Compose)
+- `2pc-compose.cfg` — 2PC architecture (Docker Compose)
+
+For a full reference of all configuration parameters, see [configuration.md](configuration.md).
+
+## Debugging Tips
+
+### AddressSanitizer (ASan)
+
+Build in Debug mode (the default) to enable ASan for memory error detection:
+
+```bash
+./scripts/build.sh Debug
+```
+
+ASan will automatically report use-after-free, buffer overflows, and other memory errors when running tests or binaries.
+
+### GDB
+
+Debug individual test binaries or components with GDB:
+
+```bash
+# Debug unit tests
+gdb ./build/tests/unit/run_unit_tests
+
+# Inside GDB, run a specific test:
+# (gdb) run --gtest_filter=TransactionTest.valid_tx
+```
+
+### Logging Levels
+
+All components support configurable log levels via their configuration file. Set `*_loglevel` to one of:
+
+| Level | Verbosity | Use Case |
+|-------|-----------|----------|
+| `TRACE` | Highest | Per-message/per-operation tracing |
+| `DEBUG` | High | Detailed internal state |
+| `INFO` | Medium | Operational events |
+| `WARN` | Low (default) | Unexpected but handled conditions |
+| `ERROR` | Minimal | Failures |
+| `FATAL` | Lowest | Unrecoverable errors |
+
+Example:
+```
+sentinel0_loglevel="TRACE"
+shard0_loglevel="DEBUG"
+atomizer0_loglevel="INFO"
+```
+
+### Code Formatting
+
+Before submitting a PR, format your code with `clang-format`:
+
+```bash
+# Format a specific file
+clang-format -i src/path/to/file.cpp
+
+# Check formatting without modifying (useful in CI)
+clang-format --dry-run --Werror src/path/to/file.cpp
+```
+
+Run the linter:
+```bash
+./scripts/lint.sh
+```
+
+## Common Build Issues and Solutions
+
+### Missing submodules
+
+**Symptom:** Build fails with missing headers from `3rdparty/`.
+
+**Fix:**
+```bash
+git submodule update --init --recursive
+```
+
+### CMake cannot find dependencies
+
+**Symptom:** CMake reports `Could not find package X` or missing include paths.
+
+**Fix:** Ensure `scripts/setup-dependencies.sh` completed successfully. The build script automatically passes `-DCMAKE_PREFIX_PATH=prefix/` to CMake. If you're running CMake manually:
+```bash
+cmake -DCMAKE_PREFIX_PATH="$(pwd)/prefix" -DCMAKE_BUILD_TYPE=Debug ..
+```
+
+### clang-format version mismatch
+
+**Symptom:** CI fails with formatting differences even after running `clang-format` locally.
+
+**Fix:** Ensure you are using `clang-format-14` specifically:
+```bash
+clang-format-14 --version
+# If not available, install-build-tools.sh should have set this up
+```
+
+### macOS Apple Silicon issues
+
+**Symptom:** Link errors or architecture mismatches on M1/M2 Macs.
+
+**Fix:** The `setup-dependencies.sh` script handles most Apple Silicon differences. If you encounter curl-related build errors in PArSEC EVM benchmarks, this is a known issue — curl is skipped on macOS by the setup script. Ensure Xcode Command Line Tools are properly selected:
+```bash
+sudo xcode-select -switch /Library/Developer/CommandLineTools
+```
+
+### LevelDB build errors
+
+**Symptom:** Errors related to Snappy compression during LevelDB compilation.
+
+**Fix:** The setup script builds LevelDB with `-DHAVE_SNAPPY=0` (Snappy disabled). If you're building LevelDB manually, ensure this flag is set.
+
+### Python virtual environment issues
+
+**Symptom:** Python scripts fail or `pip` packages are missing.
+
+**Fix:** Activate the virtual environment:
+```bash
+source ./scripts/activate-venv.sh
+```
+
+---
+
 ### How to write a good commit message
 
 See our [FAQs](getting-started.md#what-does-a-good-commit-look-like) for general advice as well as some links to helpful resources.
