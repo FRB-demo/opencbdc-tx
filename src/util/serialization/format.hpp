@@ -435,7 +435,10 @@ namespace cbdc {
                 deser.advance_cursor(
                     std::numeric_limits<size_t>::max() / 4);
                 deser.read(&dummy, sizeof(dummy));
-                return T{};
+                // Construct via the first alternative using the
+                // now-invalidated deserializer so the caller can
+                // detect the error through the serializer state.
+                return T{std::in_place_index<0>, deser};
             }
             static constexpr auto t = std::array{+[](serializer& d) {
                 return T{std::in_place_type<Ts>, d};
