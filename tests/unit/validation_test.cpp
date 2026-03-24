@@ -314,6 +314,83 @@ TEST_F(WalletTxValidationTest, summation_overflow) {
             cbdc::transaction::validation::tx_error_code::value_overflow));
 }
 
+TEST_F(WalletTxValidationTest, single_input_single_output) {
+    // m_valid_tx is created by send_to(20, ...) which produces a single-input
+    // tx with one send output and one change output. Create a minimal valid tx
+    // with exactly one input and one output by adjusting the valid tx.
+    cbdc::transaction::wallet sender;
+    cbdc::transaction::wallet receiver;
+    auto mint = sender.mint_new_coins(1, 50);
+    sender.confirm_transaction(mint);
+    auto tx = sender.send_to(50, receiver.generate_key(), true).value();
+    ASSERT_EQ(tx.m_inputs.size(), 1UL);
+    ASSERT_EQ(tx.m_outputs.size(), 1UL);
+    auto err = cbdc::transaction::validation::check_tx(tx);
+    ASSERT_FALSE(err.has_value());
+}
+
+TEST_F(WalletTxValidationTest, many_inputs_many_outputs) {
+    cbdc::transaction::wallet big_sender;
+    cbdc::transaction::wallet big_receiver;
+    auto big_mint = big_sender.mint_new_coins(150, 100);
+    big_sender.confirm_transaction(big_mint);
+    auto big_tx
+        = big_sender.send_to(120, 120, big_receiver.generate_key(), true);
+    ASSERT_TRUE(big_tx.has_value());
+    ASSERT_EQ(big_tx->m_inputs.size(), 120UL);
+    ASSERT_EQ(big_tx->m_outputs.size(), 120UL);
+    auto err = cbdc::transaction::validation::check_tx(big_tx.value());
+    ASSERT_FALSE(err.has_value());
+}
+
+TEST_F(WalletTxValidationTest, invalid_witness_truncated) {
+    // Truncate the witness to be just the program type byte (too short)
+    m_valid_tx.m_witness[0].resize(1);
+    auto err = cbdc::transaction::validation::check_tx(m_valid_tx);
+    ASSERT_TRUE(err.has_value());
+    ASSERT_TRUE(
+        std::holds_alternative<cbdc::transaction::validation::witness_error>(
+            err.value()));
+    auto wit_err
+        = std::get<cbdc::transaction::validation::witness_error>(err.value());
+    ASSERT_EQ(wit_err.m_code,
+              cbdc::transaction::validation::witness_error_code::malformed);
+}
+
+TEST_F(WalletTxValidationTest, input_output_value_mismatch_over) {
+    // Increase an output value so total outputs > total inputs
+    m_valid_tx.m_outputs[0].m_value += 1;
+    auto err = cbdc::transaction::validation::check_tx(m_valid_tx);
+    ASSERT_TRUE(err.has_value());
+    ASSERT_TRUE(
+        std::holds_alternative<cbdc::transaction::validation::tx_error_code>(
+            err.value()));
+    auto tx_err
+        = std::get<cbdc::transaction::validation::tx_error_code>(err.value());
+    ASSERT_EQ(tx_err,
+              cbdc::transaction::validation::tx_error_code::asymmetric_values);
+}
+
+TEST_F(WalletTxValidationTest, input_output_value_mismatch_under) {
+    // Decrease an output value so total outputs < total inputs
+    m_valid_tx.m_outputs[0].m_value -= 1;
+    auto err = cbdc::transaction::validation::check_tx(m_valid_tx);
+    ASSERT_TRUE(err.has_value());
+    ASSERT_TRUE(
+        std::holds_alternative<cbdc::transaction::validation::tx_error_code>(
+            err.value()));
+    auto tx_err
+        = std::get<cbdc::transaction::validation::tx_error_code>(err.value());
+    ASSERT_EQ(tx_err,
+              cbdc::transaction::validation::tx_error_code::asymmetric_values);
+}
+
+TEST_F(WalletTxValidationTest, valid_multi_input) {
+    auto err
+        = cbdc::transaction::validation::check_tx(m_valid_tx_multi_inp);
+    ASSERT_FALSE(err.has_value());
+}
+
 TEST_F(WalletTxValidationTest, sign_verify_compact) {
     auto ctx = cbdc::transaction::compact_tx(m_valid_tx);
     auto att0 = ctx.sign(m_secp.get(), m_priv0);
