@@ -201,3 +201,87 @@ TEST_F(WalletTest, load_save) {
     ASSERT_EQ(m_wallet.balance(), new_wal.balance());
     ASSERT_EQ(m_wallet.count(), new_wal.count());
 }
+
+TEST_F(WalletTest, mint_and_verify_balance) {
+    cbdc::transaction::wallet w;
+    ASSERT_EQ(w.balance(), uint64_t{0});
+    ASSERT_EQ(w.count(), 0UL);
+
+    auto mint = w.mint_new_coins(5, 200);
+    w.confirm_transaction(mint);
+
+    ASSERT_EQ(w.balance(), uint64_t{1000});
+    ASSERT_EQ(w.count(), 5UL);
+}
+
+TEST_F(WalletTest, send_and_verify_change) {
+    cbdc::transaction::wallet receiver;
+    auto target = receiver.generate_key();
+    auto send_tx = m_wallet.send_to(30, target, true).value();
+    m_wallet.confirm_transaction(send_tx);
+
+    ASSERT_EQ(m_wallet.balance(), uint64_t{70});
+
+    receiver.confirm_transaction(send_tx);
+    ASSERT_EQ(receiver.balance(), uint64_t{30});
+}
+
+TEST_F(WalletTest, overspend_insufficient_funds) {
+    auto target = m_wallet.generate_key();
+    auto send_tx = m_wallet.send_to(200, target, true);
+    ASSERT_FALSE(send_tx.has_value());
+    ASSERT_EQ(m_wallet.balance(), uint64_t{100});
+}
+
+TEST_F(WalletTest, multiple_sequential_transactions) {
+    cbdc::transaction::wallet receiver;
+
+    auto tx1 = m_wallet.send_to(10, receiver.generate_key(), true).value();
+    m_wallet.confirm_transaction(tx1);
+    receiver.confirm_transaction(tx1);
+    ASSERT_EQ(m_wallet.balance(), uint64_t{90});
+    ASSERT_EQ(receiver.balance(), uint64_t{10});
+
+    auto tx2 = m_wallet.send_to(20, receiver.generate_key(), true).value();
+    m_wallet.confirm_transaction(tx2);
+    receiver.confirm_transaction(tx2);
+    ASSERT_EQ(m_wallet.balance(), uint64_t{70});
+    ASSERT_EQ(receiver.balance(), uint64_t{30});
+
+    auto tx3 = m_wallet.send_to(30, receiver.generate_key(), true).value();
+    m_wallet.confirm_transaction(tx3);
+    receiver.confirm_transaction(tx3);
+    ASSERT_EQ(m_wallet.balance(), uint64_t{40});
+    ASSERT_EQ(receiver.balance(), uint64_t{60});
+}
+
+TEST_F(WalletTest, key_generation_uniqueness) {
+    auto key1 = m_wallet.generate_key();
+    auto key2 = m_wallet.generate_key();
+    auto key3 = m_wallet.generate_key();
+
+    ASSERT_NE(key1, key2);
+    ASSERT_NE(key1, key3);
+    ASSERT_NE(key2, key3);
+}
+
+TEST_F(WalletTest, send_exact_balance) {
+    cbdc::transaction::wallet receiver;
+    auto tx
+        = m_wallet.send_to(100, receiver.generate_key(), true).value();
+    m_wallet.confirm_transaction(tx);
+    receiver.confirm_transaction(tx);
+
+    ASSERT_EQ(m_wallet.balance(), uint64_t{0});
+    ASSERT_EQ(m_wallet.count(), 0UL);
+    ASSERT_EQ(receiver.balance(), uint64_t{100});
+}
+
+TEST_F(WalletTest, send_validated_transaction) {
+    cbdc::transaction::wallet receiver;
+    auto tx
+        = m_wallet.send_to(50, receiver.generate_key(), true).value();
+
+    auto err = cbdc::transaction::validation::check_tx(tx);
+    ASSERT_FALSE(err.has_value());
+}
