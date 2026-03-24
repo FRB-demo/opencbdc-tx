@@ -102,6 +102,14 @@ namespace cbdc::network {
         }
         std::memcpy(&pkt_sz, sz_buf.data(), sizeof(pkt_sz));
 
+        // Reject packets larger than a reasonable maximum to prevent
+        // memory exhaustion from malicious or corrupt network data.
+        static constexpr uint64_t max_packet_size
+            = 100ULL * 1024 * 1024; // 100 MiB
+        if(pkt_sz > max_packet_size) {
+            return false;
+        }
+
         pkt.clear();
 
         total_read = 0;

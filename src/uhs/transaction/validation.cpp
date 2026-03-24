@@ -112,18 +112,20 @@ namespace cbdc::transaction::validation {
         -> std::optional<tx_error> {
         uint64_t input_total{0};
         for(const auto& inp : tx.m_inputs) {
-            if(input_total + inp.m_prevout_data.m_value <= input_total) {
+            if(__builtin_add_overflow(input_total,
+                                      inp.m_prevout_data.m_value,
+                                      &input_total)) {
                 return tx_error(tx_error_code::value_overflow);
             }
-            input_total += inp.m_prevout_data.m_value;
         }
 
         uint64_t output_total{0};
         for(const auto& out : tx.m_outputs) {
-            if(output_total + out.m_value <= output_total) {
+            if(__builtin_add_overflow(output_total,
+                                      out.m_value,
+                                      &output_total)) {
                 return tx_error(tx_error_code::value_overflow);
             }
-            output_total += out.m_value;
         }
 
         if(input_total != output_total) {

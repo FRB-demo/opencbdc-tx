@@ -11,6 +11,7 @@
 #include "util/serialization/istream_serializer.hpp"
 #include "util/serialization/ostream_serializer.hpp"
 
+#include <cstring>
 #include <secp256k1_schnorrsig.h>
 
 namespace cbdc {
@@ -152,6 +153,9 @@ namespace cbdc {
                  ret});
         }
 
+        // Zero the stack copy of the private key
+        explicit_bzero(seckey.data(), seckey.size());
+
         return ret;
     }
 
@@ -208,6 +212,11 @@ namespace cbdc {
                     sig_arr.data(),
                     sizeof(sig_arr));
                 assert(sign_ret == 1);
+
+                // Zero sensitive cryptographic material from the stack
+                explicit_bzero(seckey.data(), seckey.size());
+                explicit_bzero(&keypair, sizeof(keypair));
+                explicit_bzero(sig_arr.data(), sig_arr.size());
             }
         }
     }

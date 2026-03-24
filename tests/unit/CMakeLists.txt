@@ -14,6 +14,7 @@ add_executable(run_unit_tests archiver_test.cpp
                               message_test.cpp
                               raft_test.cpp
                               rpc/tcp_test.cpp
+                              security_test.cpp
                               sentinel_2pc/controller_test.cpp
                               serialization_test.cpp
                               serialization/format_test.cpp
