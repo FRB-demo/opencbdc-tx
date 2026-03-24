@@ -388,8 +388,17 @@ namespace cbdc {
             std::variant_size_v<std::remove_reference_t<decltype(var)>> < std::
                 numeric_limits<S>::max());
         S idx{};
-        deser >> idx;
+        if(!(deser >> idx)) {
+            return deser;
+        }
         auto var_idx = static_cast<size_t>(idx);
+        if(var_idx >= std::variant_size_v<std::remove_reference_t<decltype(var)>>) {
+            uint8_t dummy{};
+            deser.advance_cursor(
+                std::numeric_limits<size_t>::max() / 4);
+            deser.read(&dummy, sizeof(dummy));
+            return deser;
+        }
         var = expand_type<Ts...>(var_idx);
         std::visit(
             [&](auto&& arg) {
@@ -421,11 +430,16 @@ namespace cbdc {
             S idx{};
             deser >> idx;
             auto i = static_cast<size_t>(idx);
-            assert(i < std::variant_size_v<T>);
+            if(i >= std::variant_size_v<T>) {
+                uint8_t dummy{};
+                deser.advance_cursor(
+                    std::numeric_limits<size_t>::max() / 4);
+                deser.read(&dummy, sizeof(dummy));
+                return T{};
+            }
             static constexpr auto t = std::array{+[](serializer& d) {
                 return T{std::in_place_type<Ts>, d};
             }...};
-            // TODO: deserialization error handling for variant indexes.
             return t.at(i)(deser);
         }
     }

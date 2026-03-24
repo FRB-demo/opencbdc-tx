@@ -10,6 +10,8 @@
 #include "util/serialization/format.hpp"
 #include "util/serialization/util.hpp"
 
+#include <cstring>
+
 namespace cbdc::transaction {
     auto out_point::operator==(const out_point& rhs) const -> bool {
         return m_tx_id == rhs.m_tx_id && m_index == rhs.m_index;
@@ -152,6 +154,10 @@ namespace cbdc::transaction {
                                         nullptr,
                                         nullptr);
         assert(sign_ret == 1);
+
+        // Zero sensitive cryptographic material from the stack
+        explicit_bzero(&keypair, sizeof(keypair));
+
         return {pubkey, sig};
     }
 

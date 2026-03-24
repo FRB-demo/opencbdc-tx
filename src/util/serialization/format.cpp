@@ -5,6 +5,8 @@
 
 #include "format.hpp"
 
+#include <limits>
+
 namespace cbdc {
     auto operator<<(serializer& packet, std::byte b) -> serializer& {
         packet << static_cast<uint8_t>(b);
@@ -29,7 +31,18 @@ namespace cbdc {
 
     auto operator>>(serializer& deser, buffer& b) -> serializer& {
         uint64_t sz{};
-        deser >> sz;
+        if(!(deser >> sz)) {
+            return deser;
+        }
+        if(sz > config::maximum_reservation) {
+            // Reject oversized buffers to prevent memory exhaustion.
+            // Invalidate the deserializer by advancing past available data.
+            uint8_t dummy{};
+            deser.advance_cursor(
+                std::numeric_limits<size_t>::max() / 4);
+            deser.read(&dummy, sizeof(dummy));
+            return deser;
+        }
         b.extend(sz);
         deser.read(b.data(), sz);
         return deser;
